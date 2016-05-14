@@ -6,7 +6,6 @@ import org.apache.spark.api.java.*;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.Function2;
-import org.apache.spark.api.java.function.Function3;
 
 import scala.Tuple2;
 
@@ -64,7 +63,6 @@ public class SumRatings {
 
         String inputDataPath = args[0], outputDataPath = args[1];
         SparkConf conf = new SparkConf();
-
         conf.setAppName("Movie Lens Application");
 
         JavaSparkContext sc = new JavaSparkContext(conf);
@@ -93,20 +91,128 @@ public class SumRatings {
         // total and n are the 2 arguments for each row, then they are added to produce a running total
         //Function2<Float, Float, Float> sumRatings = (total, n) -> (total + n);
 
-        // Defines a function that reduces rows from userRatings into a single userId, ratingSum, numRatings row
+        // 1. Define a function that reduces rows from userRatings into a single userId, ratingSum, numRatings row
         // We use the t1._1 and t2._1 notation to specify the 'column' of the tuple we are accessing.
 
         Function2<Tuple2<Float, Integer>, Tuple2<Float,Integer>, Tuple2<Float, Integer>> userTotals =
-                (t1, t2) -> new Tuple2<Float, Integer>(t1._1 + t2._1, t1._2 + t2._2);
-
-        // Initially used a Function2, but now using Function3 to get total movies rated and sum of ratings at same time.
-        //Function3<Integer, Integer, Float, Tuple2<Integer, Float>> sumRatings = (numRatings, totalRatings, n) -> (numRatings++, totalRatings + n);
+                (t1, t2) -> new Tuple2(t1._1 + t2._1, t1._2 + t2._2);
 
         JavaPairRDD<String, Tuple2<Float, Integer>> ratingSums = userRatings.reduceByKey(userTotals);
 
-        ratingSums.saveAsTextFile(outputDataPath);
+        //ratingSums.saveAsTextFile(outputDataPath);
+
+        // Job 2: Get top 10 users per genre
+        // Output: <movieId, userId \t rating>
+        // # Note: We concatenate userId and rating so we can do the join - is it possible to join
+        // with a tuple2 and string to produce a <String, Tuple3> join??
+        JavaPairRDD<String, String> movieRatings = ratingData.mapToPair(s ->
+                {  String[] values = s.split(",");
+                    return
+                            new Tuple2(values[1], values[0] + "\t" + Float.parseFloat(values[2]));
+                }
+        ).cache();
+
+        // Get movie genres
+        // Output: <movieId, genresString>
+        JavaPairRDD<String, String> movieGenres = movieData.mapToPair(s ->
+            {
+                // Can't split by comma, as some movies have titles with commas!
+                String[] values = s.split(",");
+                String genres;
+                // If there are commas in the title
+                if (values.length > 3) {
+                    int commaIndex = s.lastIndexOf(",");
+                    genres = s.substring(commaIndex + 1);
+                }
+                else {
+                    genres = values[2];
+                }
+                return new Tuple2(values[0], genres);
+            }
+        );
+
+        // Join user ratings to movie genres by movieId
+        // Output: movieId, <genres, userId \t rating>
+        JavaPairRDD<String, Tuple2<String, String>> join = movieGenres.join(movieRatings);
+
+        // Map - produce <genre, userId> rows and count to get top 10 per genre. Each row represents a movie a user has
+        // rated in the genre.
+        // Input: movieId, <genres, userId \t rating>
+        // Output: genre, GenreCount (genre, userId, 1)
+        JavaPairRDD<String, GenreCount> genreUsers = join.values().flatMapToPair(v->{
+            ArrayList<Tuple2<String, GenreCount>> results = new ArrayList();
+
+            // Get the user Id and separate each genre - emit a row for each genre and userId pair
+            int tabIndex = v._2.indexOf('\t');
+            String userId = v._2.substring(0, tabIndex);
+            String genreList = v._1;
+            String[] genres = genreList.split("\\|");
+            for (String g : genres) {
+                results.add(new Tuple2(g + "\t" + userId, new GenreCount(g, userId, 1)));
+            }
+            return results;
+            }
+        );
+
+        genreUsers.saveAsTextFile("debug/genreUsers.txt");
+
+        // Reduce counts - get number of ratings a user has in each genre, then map it back to genre, GenreCount
+        // instead of genre \t userId, GenreCount (ie change the key so its only genre)
+
+        /*
+        JavaPairRDD<String, GenreCount> genreRatingAvg = genreUsers.aggregateByKey(
+                1,      // Initial zero
+                1,      //
+                (r,v)-> new GenreCount (n +),
+                (v1,v2) -> new Tuple2<Integer,Integer> (v1._1 + v2._1, v1._2 + v2._2)
+        );
+        */
+
+        JavaPairRDD<String, GenreCount> genreRatingsPerUser = genreUsers.reduceByKey(
+                (g1, g2) -> new GenreCount(g1.genre, g1.userId, g1.count + g2.count)
+        ).mapToPair(v -> new Tuple2(v._2.genre, v._2));
+
+        genreRatingsPerUser.saveAsTextFile("debug/genreUsersTotals.txt");
+
+
+        // Group by genre -
+        JavaPairRDD<String, Iterable<GenreCount>> totalGenreCounts = genreRatingsPerUser.groupByKey(1);
+
+        // Get the top 5 users per genre - sort GenreCounts and output
+        JavaPairRDD<String, GenreCount> topUsers = totalGenreCounts.mapToPair(v ->
+            {
+                TreeSet<GenreCount> counts = new TreeSet();
+                for (GenreCount g : v._2) {
+                    counts.add(g);
+                }
+
+                TreeSet<GenreCount> result = new TreeSet();
+                for (int i = 0; i < 5; i++) {
+                    if (counts.isEmpty()) {
+                        break;
+                    }
+                    result.add(counts.pollFirst());
+                }
+                return new Tuple2(v._1, result);
+            }
+        );
+
+        topUsers.saveAsTextFile("debug/topUsers.txt");
+
+
+        //JavaPairRDD<String, Integer> totalGenreUsers = genreUsers.reduceByKey(
+        //        (v1, v2) -> v1 + v2
+        //);
+
+
+        // Order by genre, count and get list of top 10 users <genre, userId>
+
+
         sc.close();
 
+        // 2. Use map to produce output rows of <UserId, avgRating, numRatings>
+
+        // 3. Join with the original dataset to get <userId, movieId,
 
         // Join results into 1 row for each userId, <ratingSum, numRated>
 
