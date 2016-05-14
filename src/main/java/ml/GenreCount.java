@@ -20,7 +20,7 @@ public class GenreCount implements Comparable, Serializable {
 
     @Override
     public String toString() {
-        return userId + "\t" + count + "\t" + rating;
+        return genre + "\t" + userId + "\t" + count + "\t" + rating + "\t";
     }
 
     @Override
