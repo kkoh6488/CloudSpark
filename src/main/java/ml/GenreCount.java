@@ -9,16 +9,18 @@ public class GenreCount implements Comparable, Serializable {
     String genre;
     String userId;
     Integer count;
+    Float rating;
 
-    public GenreCount(String genre, String user, int count) {
+    public GenreCount(String genre, String user, int count, float rating) {
         this.genre = genre;
         this.userId = user;
         this.count = count;
+        this.rating = rating;
     }
 
     @Override
     public String toString() {
-        return userId + "\t" + count;
+        return userId + "\t" + count + "\t" + rating;
     }
 
     @Override

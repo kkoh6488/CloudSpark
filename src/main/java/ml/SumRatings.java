@@ -145,10 +145,11 @@ public class SumRatings {
             // Get the user Id and separate each genre - emit a row for each genre and userId pair
             int tabIndex = v._2.indexOf('\t');
             String userId = v._2.substring(0, tabIndex);
+            float rating = Float.parseFloat(v._2.substring(tabIndex));
             String genreList = v._1;
             String[] genres = genreList.split("\\|");
             for (String g : genres) {
-                results.add(new Tuple2(g + "\t" + userId, new GenreCount(g, userId, 1)));
+                results.add(new Tuple2(g + "\t" + userId, new GenreCount(g, userId, 1, rating)));
             }
             return results;
             }
@@ -169,7 +170,7 @@ public class SumRatings {
         */
 
         JavaPairRDD<String, GenreCount> genreRatingsPerUser = genreUsers.reduceByKey(
-                (g1, g2) -> new GenreCount(g1.genre, g1.userId, g1.count + g2.count)
+                (g1, g2) -> new GenreCount(g1.genre, g1.userId, g1.count + g2.count, g1.rating + g2.rating)
         ).mapToPair(v -> new Tuple2(v._2.genre, v._2));
 
         genreRatingsPerUser.saveAsTextFile("debug/genreUsersTotals.txt");
@@ -179,6 +180,8 @@ public class SumRatings {
         JavaPairRDD<String, Iterable<GenreCount>> totalGenreCounts = genreRatingsPerUser.groupByKey(1);
 
         // Get the top 5 users per genre - sort GenreCounts and output
+        // Output: genre, GenreCount
+        // Printed: genre, [userId \t count \t ratingSum , ... ]
         JavaPairRDD<String, GenreCount> topUsers = totalGenreCounts.mapToPair(v ->
             {
                 TreeSet<GenreCount> counts = new TreeSet();
