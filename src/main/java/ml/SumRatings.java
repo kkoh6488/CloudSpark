@@ -46,11 +46,11 @@ public class SumRatings {
 
         // Format sums as: userId, avgRating \t totalRatings
         // So it can be joined later
-        JavaPairRDD<String, String> formattedSums = ratingSums.mapToPair(s -> new Tuple2(s._1, s._2._1 + "\t" + s._2._2));
+        JavaPairRDD<String, String> formattedSums = ratingSums.mapToPair(s -> new Tuple2(s._1, (s._2._1 / (float) s._2._2) + "\t" + s._2._2));
 
-        ratingSums.saveAsTextFile("debug/sumRatings.txt");
+        //ratingSums.saveAsTextFile("debug/sumRatings.txt");
 
-        // Job 2: Get top 10 users per genre
+        // Job 2: Get top 5 users per genre
         // Output: <movieId, userId \t rating>
         // # Note: We concatenate userId and rating so we can do the join - is it possible to join
         // with a tuple2 and string to produce a <String, Tuple3> join??
@@ -104,7 +104,7 @@ public class SumRatings {
             }
         );
 
-        genreUsers.saveAsTextFile("debug/genreUsers.txt");
+        //genreUsers.saveAsTextFile("debug/genreUsers.txt");
 
         // Reduce counts - get number of ratings a user has in each genre, then map it back to genre, GenreCount
         // instead of genre \t userId, GenreCount (ie change the key so its only genre).
@@ -112,7 +112,7 @@ public class SumRatings {
                 (g1, g2) -> new GenreCount(g1.genre, g1.userId, g1.count + g2.count, g1.rating + g2.rating)
         ).mapToPair(v -> new Tuple2(v._2.genre, v._2));
 
-        genreRatingsPerUser.saveAsTextFile("debug/genreUsersTotals.txt");
+        //genreRatingsPerUser.saveAsTextFile("debug/genreUsersTotals.txt");
 
         // Group by genre, so we get all the ratings by genre
         JavaPairRDD<String, Iterable<GenreCount>> totalGenreCounts = genreRatingsPerUser.groupByKey(1);
@@ -133,24 +133,25 @@ public class SumRatings {
                     if (counts.isEmpty()) {
                         break;
                     }
-                    result.add(new Tuple2(v._1, counts.pollFirst()));
+                    GenreCount g = counts.pollFirst();
+                    result.add(new Tuple2(g.userId, g));
                 }
                 return result;
             }
         );
 
-        topUsers.saveAsTextFile("debug/topUsers.txt");
+        //topUsers.saveAsTextFile("debug/topUsers.txt");
 
         // Join top users with job 1 data to get stats for total dataset
         // Make the key the userId
-        JavaPairRDD<String, GenreCount> totalStats = topUsers.mapToPair(
-                v -> new Tuple2(v._2.userId, v._2)
-        );
+        //JavaPairRDD<String, GenreCount> totalStats = topUsers.mapToPair(
+        //        v -> new Tuple2(v._2.userId, v._2)
+        //);
 
         // Join by key
         // Print the final result - GenreKey (toString) \t avgRating \t numRatings
-        JavaPairRDD<String, Tuple2<GenreCount, String>> totalStatJoin = totalStats.join(formattedSums);
-        JavaRDD<String> finalResult = totalStatJoin.map(s -> s._2._1.toString() + s._2._2);
+        JavaPairRDD<String, Tuple2<GenreCount, String>> totalStatJoin = topUsers.join(formattedSums);
+        JavaRDD<String> finalResult = totalStatJoin.map(s -> s._2._1.toResultString() + s._2._2);
 
         finalResult.saveAsTextFile("debug/final.txt");
 

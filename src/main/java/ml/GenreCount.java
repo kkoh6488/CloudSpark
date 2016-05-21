@@ -23,6 +23,10 @@ public class GenreCount implements Comparable, Serializable {
         return genre + "\t" + userId + "\t" + count + "\t" + rating + "\t";
     }
 
+    public String toResultString() {
+        return genre + "\t" + userId + "\t" + count + "\t" + (rating/(float) count) + "\t";
+    }
+
     @Override
     public int compareTo(Object o) {
         GenreCount g = (GenreCount) o;
