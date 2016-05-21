@@ -17,7 +17,7 @@ public class SumRatings {
 
     public static void main(String[] args) {
 
-        String inputDataPath = args[0], outputDataPath = args[1];
+        String inputDataPath = args[0];
         SparkConf conf = new SparkConf();
         conf.setAppName("Movie Lens Application");
 
@@ -38,7 +38,6 @@ public class SumRatings {
 
         // Job 1. Define a function that reduces rows from userRatings into a single userId, ratingSum, numRatings row
         // We use the t1._1 and t2._1 notation to specify the 'column' of the tuple we are accessing.
-
         Function2<Tuple2<Float, Integer>, Tuple2<Float,Integer>, Tuple2<Float, Integer>> userTotals =
                 (t1, t2) -> new Tuple2(t1._1 + t2._1, t1._2 + t2._2);
 
@@ -48,12 +47,8 @@ public class SumRatings {
         // So it can be joined later
         JavaPairRDD<String, String> formattedSums = ratingSums.mapToPair(s -> new Tuple2(s._1, (s._2._1 / (float) s._2._2) + "\t" + s._2._2));
 
-        //ratingSums.saveAsTextFile("debug/sumRatings.txt");
-
         // Job 2: Get top 5 users per genre
         // Output: <movieId, userId \t rating>
-        // # Note: We concatenate userId and rating so we can do the join - is it possible to join
-        // with a tuple2 and string to produce a <String, Tuple3> join??
         JavaPairRDD<String, String> movieRatings = ratingData.mapToPair(s ->
                 {  String[] values = s.split(",");
                     return
@@ -104,22 +99,18 @@ public class SumRatings {
             }
         );
 
-        //genreUsers.saveAsTextFile("debug/genreUsers.txt");
-
         // Reduce counts - get number of ratings a user has in each genre, then map it back to genre, GenreCount
         // instead of genre \t userId, GenreCount (ie change the key so its only genre).
         JavaPairRDD<String, GenreCount> genreRatingsPerUser = genreUsers.reduceByKey(
                 (g1, g2) -> new GenreCount(g1.genre, g1.userId, g1.count + g2.count, g1.rating + g2.rating)
         ).mapToPair(v -> new Tuple2(v._2.genre, v._2));
 
-        //genreRatingsPerUser.saveAsTextFile("debug/genreUsersTotals.txt");
-
         // Group by genre, so we get all the ratings by genre
         JavaPairRDD<String, Iterable<GenreCount>> totalGenreCounts = genreRatingsPerUser.groupByKey(1);
 
         // Get the top 5 users per genre - sort GenreCounts and output top 5.
         // Order is determined by the comparator the GenreCounts object.
-        // Output: genre, GenreCount
+        // Output: userId, GenreCount
         // Printed: genre, [userId \t count \t ratingSum , ... ]
         JavaPairRDD<String, GenreCount> topUsers = totalGenreCounts.flatMapToPair(v ->
             {
@@ -140,15 +131,7 @@ public class SumRatings {
             }
         );
 
-        //topUsers.saveAsTextFile("debug/topUsers.txt");
-
         // Join top users with job 1 data to get stats for total dataset
-        // Make the key the userId
-        //JavaPairRDD<String, GenreCount> totalStats = topUsers.mapToPair(
-        //        v -> new Tuple2(v._2.userId, v._2)
-        //);
-
-        // Join by key
         // Print the final result - GenreKey (toString) \t avgRating \t numRatings
         JavaPairRDD<String, Tuple2<GenreCount, String>> totalStatJoin = topUsers.join(formattedSums);
         JavaRDD<String> finalResult = totalStatJoin.map(s -> s._2._1.toResultString() + s._2._2);
