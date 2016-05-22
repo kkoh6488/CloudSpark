@@ -25,17 +25,31 @@ def calc_avg(line):
 	return(uid, (sm/count))
 
 ### NEIGHBORHOOD SIM ###
-def do_precalc(line):
-	ratings = line[1][0]
-	irating = -1 
-	for r in ratings:
-		if r[0] == i:
-			irating = r[0]
-	if irating != -1:
+def do_precalculation(line):
+	if line is not None:
+		ratings = line[1][0]
+		average = line[1][1]
+		usersims = []
+		irating = -1 
+		# if this user has rated i
 		for r in ratings:
 			if r[0] == i:
 				irating = r[0]
 
+		# don't calculate unless the user has rated i
+		if irating != -1:
+			# calcate A and C
+			a = irating - average
+			c = a ** 2
+			for r in ratings:
+				# don't calculate sim(i,i)
+				if r[0] != i:
+					c = r[0] - average
+					d = c ** 2
+					# add to rdd
+					temp_tup = ((i,r[0]),(a,b,c,d))
+					usersims.append(temp_tup)
+			return usersims
 
 
 if __name__ == "__main__":
@@ -69,7 +83,8 @@ if __name__ == "__main__":
 	have_rated = pentries.map(lambda entry: entry[1][0]).collect()
 	# havent_rated = moventries.filter(filter_rated).collectAsMap()
 
-	sim_rdd
+	sim_rdd = sc.parallelize(((0,0),(0,0,0,0)))
 	for i in have_rated:
-		sim_rdd.add(user_aggregated.map(do_precalc))
+		print(user_aggregated.flatMap(do_precalculation).saveAsTextFile("test"))
 
+	
