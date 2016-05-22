@@ -25,21 +25,16 @@ def calc_avg(line):
 	return(uid, (sm/count))
 
 ### NEIGHBORHOOD SIM ###
-def filter_rated(line):
-	if line[0] not in have_rated:
-		return True
-	return False
-
-def build_user(line):
+def do_precalc(line):
 	ratings = line[1][0]
-	bi, bj = False, False
+	irating = -1 
 	for r in ratings:
-		if int(r[0]) == i:
-			bi = True
-		if int(r[0]) == j:
-			bj = True
-	if bi and bj:
-		return True
+		if r[0] == i:
+			irating = r[0]
+	if irating != -1:
+		for r in ratings:
+			if r[0] == i:
+				irating = r[0]
 
 
 
@@ -72,13 +67,9 @@ if __name__ == "__main__":
 
 	# Create set of movies
 	have_rated = pentries.map(lambda entry: entry[1][0]).collect()
-	havent_rated = moventries.filter(filter_rated).collectAsMap()
+	# havent_rated = moventries.filter(filter_rated).collectAsMap()
 
+	sim_rdd
 	for i in have_rated:
-		for j in havent_rated.keys():
-			sim_rdd = user_aggregated.filter(build_user)
-			
-			print(sim_rdd.collectAsMap().keys())
-			print(i)
-			print(j)
+		sim_rdd.add(user_aggregated.map(do_precalc))
 
