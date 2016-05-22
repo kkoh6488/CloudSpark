@@ -1,21 +1,17 @@
 from pyspark import SparkContext
-from pyspark.mllib.linalg.distributed import CoordinateMatrix, MatrixEntry
-import collections
-import numpy
-import sys
 import re
-from os.path import join
 
-from pyspark import SparkConf, SparkContext
-from pyspark.mllib.linalg.distributed import *
-from pyspark.mllib.stat import Statistics
-from pyspark.sql import SQLContext
+# This function convert entries of ratings.csv into (userid -> (movieid, rating))
+def parse_rating(line):
+	fields = re.findall('("[^"]+"|[^,]+)', line.strip())
+	return (int(fields[0]), (int(fields[1]), float(fields[2])))
 
-# This function convert entries of ratings.csv into a Matrix Entry
-def extract_movrt(line):
-    fields = re.findall('("[^"]+"|[^,]+)', line.strip())
-    return MatrixEntry(int(fields[0]), int(fields[1]), float(fields[2]))
+# This function converts entries of movies.csv into (movieid -> title)
+def parse_movie(line):
+	fields = re.findall('("[^"]+"|[^,]+)', line.strip())
+	return (int(fields[0]), fields[1])
 
+### AVERAGE ###
 # Merge count and sum values
 def add_values(a, b):
 	counta, sma = a
@@ -28,11 +24,27 @@ def calc_avg(line):
 	sm , count = sm_count
 	return(uid, (sm/count))
 
+### NEIGHBORHOOD SIM ###
+def filter_rated(line):
+	if line[0] not in have_rated:
+		return True
+	return False
+
+def build_user(line):
+	ratings = line[1][0]
+	bi, bj = False, False
+	for r in ratings:
+		if int(r[0]) == i:
+			bi = True
+		if int(r[0]) == j:
+			bj = True
+	if bi and bj:
+		return True
+
+
 
 if __name__ == "__main__":
 	sc = SparkContext(appName="Workload2")
-	sqlContext = SQLContext(sc)
-	sqlCtx = sqlContext
 
 	# Format userID,MovieID,Rating,TimeStamp
 	#personal_ratings = sc.textFile("/user/dzha9390/spark/personalRatings.txt")
@@ -44,19 +56,29 @@ if __name__ == "__main__":
 	ratings = sc.textFile("/Users/eddie/Desktop/ratings.csv")
 	movies = sc.textFile("/Users/eddie/Desktop/movies.csv")
 
-	# Create movie sim matrix
-	# w, h = max(unrated_movies.keys()), len(have_rated)
-	# matrix = [[-1 for x in range(w)] for y in range(h)]
+	# userID -> (movieID, rating)
+	entries = ratings.map(parse_rating)
+	pentries = personal_ratings.map(parse_rating)
 
-	entries = ratings.map(extract_movrt)
-	mat = CoordinateMatrix(entries)
-	matrix = mat.entries.cache()
+	# movieID -> title
+	moventries = movies.map(parse_movie)
 
 	# Average user rating
-	user_rating_sum_count = matrix.map(lambda entry: (entry.i, (1, entry.value))).reduceByKey(add_values)
+	user_rating_sum_count = entries.map(lambda entry: (entry[0],(entry[1][1], 1))).reduceByKey(add_values)
 	user_rating_average = user_rating_sum_count.map(calc_avg)
-	
-	
-	user_rating_average.saveAsTextFile("test")
 
+	# Stores userID -> ([(movieID, rating)],average)
+	user_aggregated = entries.groupByKey().join(user_rating_average).cache()
+
+	# Create set of movies
+	have_rated = pentries.map(lambda entry: entry[1][0]).collect()
+	havent_rated = moventries.filter(filter_rated).collectAsMap()
+
+	for i in have_rated:
+		for j in havent_rated.keys():
+			sim_rdd = user_aggregated.filter(build_user)
+			
+			print(sim_rdd.collectAsMap().keys())
+			print(i)
+			print(j)
 
