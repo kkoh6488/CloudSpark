@@ -1,5 +1,7 @@
 from pyspark import SparkContext
 import re
+import math
+
 
 # This function convert entries of ratings.csv into (userid -> (movieid, rating))
 def parse_rating(line):
@@ -25,31 +27,48 @@ def calc_avg(line):
 	return(uid, (sm/count))
 
 ### NEIGHBORHOOD SIM ###
+# Set variables ACD for use
 def do_precalculation(line):
-	if line is not None:
-		ratings = line[1][0]
-		average = line[1][1]
-		usersims = []
-		irating = -1 
-		# if this user has rated i
-		for r in ratings:
-			if r[0] == i:
-				irating = r[0]
+	ratings = line[1][0]
+	average = line[1][1]
+	user_sim = []
+	ratei = -1 
+	# if this user has rated i
+	for r in ratings:
+		if r[0] == i:
+			ratei = r[0]
 
-		# don't calculate unless the user has rated i
-		if irating != -1:
-			# calcate A and C
-			a = irating - average
-			c = a ** 2
-			for r in ratings:
-				# don't calculate sim(i,i)
-				if r[0] != i:
-					c = r[0] - average
-					d = c ** 2
-					# add to rdd
-					temp_tup = ((i,r[0]),(a,b,c,d))
-					usersims.append(temp_tup)
-			return usersims
+	# don't calculate unless the user has rated i
+	if ratei != -1:
+		# calcate A and C
+		a = ratei - average
+		c = a ** 2
+		for r in ratings:
+			j = r[0]
+			
+			# don't calculate sim(i,i)
+			if j != i:
+				b = r[1] - average
+				d = b ** 2
+				numerator = a * b
+				# add to rdd
+				temp_tup = ((i,j),(numerator,c,d))
+				user_sim.append(temp_tup)
+	return user_sim
+
+# Final calculations
+def add_topbottom(a,b):
+	numa, ca, da = a
+	numb, cb, db = b
+	return(numa+numb, ca+cb, da+db)
+
+
+def do_final_calc(line):
+	num, c, d = line[1]
+	c = math.sqrt(c)
+	d = math.sqrt(d)
+	return (line[0], num/(c*d))
+
 
 
 if __name__ == "__main__":
@@ -83,8 +102,12 @@ if __name__ == "__main__":
 	have_rated = pentries.map(lambda entry: entry[1][0]).collect()
 	# havent_rated = moventries.filter(filter_rated).collectAsMap()
 
-	sim_rdd = sc.parallelize(((0,0),(0,0,0,0)))
+	# Get all (i,j variables)
+	pre_calc_sim_rdd = sc.emptyRDD()
 	for i in have_rated:
-		print(user_aggregated.flatMap(do_precalculation).saveAsTextFile("test"))
-
+		pre_calc_sim_rdd += (user_aggregated.flatMap(do_precalculation))
+	
+	# Aggregate by i,j and compute
+	sim_ij = pre_calc_sim_rdd.reduceByKey(add_topbottom).map(do_final_calc)
+	print(sim_ij.collect())
 	
