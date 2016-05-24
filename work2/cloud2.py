@@ -61,7 +61,7 @@ def do_precalculation(i, line):
 		return tuple(user_sim)
 	return ()
 
-# Final calculations
+# Final calcs
 def add_topbottom(a, b):
 	numa, ca, da = a
 	numb, cb, db = b
@@ -83,6 +83,14 @@ def keep_topten(line):
 	top_ten= sorted(data, reverse=True, key=lambda tup: tup[1])[:10]
 	return (line[0],top_ten)
 
+### PREDICTION GENERATION ###
+def calculate_predictions(line):
+	num, denom = 0, 0
+	for sim in line[1]:
+		num += (sim[1] * p_rating[sim[0]])
+		denom += abs(sim[1])
+	return (line[0], num/denom)
+
 if __name__ == "__main__":
 	sc = SparkContext(appName="Workload2")
 
@@ -101,7 +109,7 @@ if __name__ == "__main__":
 	pentries = personal_ratings.map(parse_rating)
 
 	# movieID -> title
-	moventries = movies.map(parse_movie)
+	moventries = movies.map(parse_movie).collectAsMap()
 
 	# Average user rating
 	user_rating_sum_count = entries.map(lambda entry: (entry[0],(entry[1][1], 1))).reduceByKey(add_values)
@@ -111,19 +119,27 @@ if __name__ == "__main__":
 	# Stores userID -> ([(movieID, rating)],average)
 	user_aggregated = entries.groupByKey().join(user_rating_average).cache()
 
-	# Create set of movies
-	have_rated = pentries.map(lambda entry: entry[1][0]).collect()
+	# Create personal rating dictionary
+	p_rating = pentries.map(lambda entry:(entry[1][0],entry[1][1])).collectAsMap()
 
 	# Get all ((i,j), variables)
 	pre_calc_sim_rdd = sc.emptyRDD()
-	for i in have_rated:
+	for i in p_rating.keys():
 		pre_calc_sim_rdd += user_aggregated.flatMap(lambda entry: do_precalculation(i, entry))
 	
-	# Aggregate by i,j and compute
-	sim_ij = pre_calc_sim_rdd.reduceByKey(add_topbottom).flatMap(do_final_calc).take(10)
+	# Aggregate by i,j and compute similarities then cut it off
+	# Output i -> [(j, sim),(j, sim)]
+	sim_ij = pre_calc_sim_rdd.reduceByKey(add_topbottom).flatMap(do_final_calc).groupByKey().map(keep_topten)
 	
-	#print(sim_ij.collect())
-	sim_ij.saveAsTextFile("test")
+	# Calculate top predictions and only keep top 50
+	top_predictions = sim_ij.map(calculate_predictions).sortBy(lambda entry: entry[1],  ascending=False).take(50)
+
+	f=open('test.txt','w')
+	for prediction in top_predictions:
+		out = ""
+		out = str(prediction[0]) + "," + moventries[prediction[0]] + ":" + str(prediction[1])
+		f.write(out.encode('utf-8')+'\n') 
+	f.close()
 
 
 
