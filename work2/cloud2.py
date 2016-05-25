@@ -22,8 +22,7 @@ def calculate_average(line):
 	for r in ratings:
 		total += r[1]
 		count += 1
-	average = total/count
-	return(line[0], (line[1], average))
+	return(line[0], (line[1], total/count))
 
 ### NEIGHBORHOOD SIM ###
 
@@ -37,15 +36,14 @@ def do_precalculation(i, line):
 	if i in ratings.keys():
 		rating_i = ratings[i]
 		a = rating_i - average
-		c = a ** 2
+		c = a * a
 
 		for j, rating_j in ratings.iteritems():
 			b = rating_j - average
-			d = b ** 2
-			numerator = a * b
+			d = b * b
 				
 			# add to rdd
-			temp_tup = ( (i,j) , (numerator,c,d) )
+			temp_tup = ( (i,j) , (a*b,c,d) )
 			user_sim.append(temp_tup)
 	
 	return tuple(user_sim)
@@ -67,7 +65,6 @@ def do_final_calc(line):
 	return tuple(final_calc)
 
 def keep_topten(line):
-	top_ten = []
 	data = line[1]
 	top_ten= sorted(data, reverse=True, key=lambda tup: tup[1])[:10]
 	return (line[0],top_ten)
@@ -84,14 +81,14 @@ if __name__ == "__main__":
 	sc = SparkContext(appName="Workload2")
 
 	# Format userID,MovieID,Rating,TimeStamp
-	#personal_ratings = sc.textFile("/user/dzha9390/spark/personalRatings.txt")
-	#ratings = sc.textFile("/share/movie/ratings.csv")
+	personal_ratings = sc.textFile("/user/dzha9390/spark/personalRatings.txt")
+	ratings = sc.textFile("/share/movie/ratings.csv")
 	# Format MovieID,Title,Genres
-	#movies = sc.textFile("/share/movie/movies.csv")
+	movies = sc.textFile("/share/movie/movies.csv")
 
-	personal_ratings = sc.textFile("/Users/eddie/Desktop/personalRatings.txt")
-	ratings = sc.textFile("/Users/eddie/Desktop/ratings.csv")
-	movies = sc.textFile("/Users/eddie/Desktop/movies.csv")
+	#personal_ratings = sc.textFile("/Users/eddie/Desktop/personalRatings.txt")
+	#ratings = sc.textFile("/Users/eddie/Desktop/ratings.csv")
+	#movies = sc.textFile("/Users/eddie/Desktop/movies.csv")
 
 	# userID -> (movieID, rating)
 	entries = ratings.map(parse_rating)
@@ -103,16 +100,17 @@ if __name__ == "__main__":
 	user_aggregated = entries.groupByKey().map(calculate_average).cache()
 
 	# Create personal rating dictionary
-	p_rating = pentries.map(lambda entry:(entry[1][0],entry[1][1])).collectAsMap()
+	p_rating = sc.broadcast(pentries.map(lambda entry:(entry[1][0],entry[1][1])).collectAsMap())
 
 	# Get all ((i,j), variables)
 	pre_calc_sim_rdd = sc.emptyRDD()
 	for i in p_rating.keys():
 		pre_calc_sim_rdd += user_aggregated.flatMap(lambda entry: do_precalculation(i, entry))
-	
+
+
 	# Aggregate by i,j and compute similarities then cut it off
 	# Output i -> [(j, sim),(j, sim)]
-	sim_ij = pre_calc_sim_rdd.reduceByKey(add_topbottom).flatMap(do_final_calc).groupByKey().map(keep_topten)
+	sim_ij = pre_calc_sim_rdd.reduceByKey(add_topbottom, 8).flatMap(do_final_calc).groupByKey().map(keep_topten)
 	
 		# Calculate top predictions and only keep top 50
 	top_predictions = sim_ij.map(calculate_predictions).sortByKey(ascending=False).take(50)
