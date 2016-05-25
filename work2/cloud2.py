@@ -31,36 +31,33 @@ def calc_avg(line):
 # Set variables ACD for use
 # userID -> ([(movieID, rating)],average)
 def do_precalculation(line):
-	ratings = line[1][0]
 	average = line[1][1]
+	user_ratings = dict(line[1][0])
 	user_sim = []
 	have_rated = [] 
 
-	# if this user has rated i
-	for r in ratings:
-		if r[0] in p_rating.keys():
-			have_rated.append((r[0],r[1]))
+	for pr in p_rating.keys():
+		if pr in user_ratings:
+			have_rated.append(pr)
+
 
 	# don't calculate unless the user has rated a movie i
 	if len(have_rated) != 0:
-		for movie_i in have_rated:
-			# calcate A and C
-			ratei = movie_i[1]
-			i = movie_i[0]
-			a = ratei - average
+		for i in have_rated:
+			rate_i = user_ratings[i]
+			a = rate_i - average
 			c = a ** 2
-			for r in ratings:
-				j = r[0]
-				
-				# don't calculate sim(i,i)
+
+			for j in user_ratings.keys():
 				if j != i:
-					b = r[1] - average
+					rate_j = user_ratings[j]
+					b = rate_j - average
 					d = b ** 2
 					numerator = a * b
-					
 					# add to rdd
 					temp_tup = ( (i,j) , (numerator,c,d) )
 					user_sim.append(temp_tup)
+
 		return tuple(user_sim)
 	return ()
 
@@ -134,7 +131,6 @@ if __name__ == "__main__":
 	# Calculate top predictions and only keep top 50
 	top_predictions = sim_ij.map(calculate_predictions).sortBy(lambda entry: entry[1],  ascending=False).take(50)
 
-	print(top_predictions)
 
 	f=open('test.txt','w')
 	for prediction in top_predictions:
