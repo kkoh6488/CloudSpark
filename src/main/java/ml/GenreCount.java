@@ -3,7 +3,8 @@ package ml;
 import java.io.Serializable;
 
 /**
- * Created by Ken on 14/05/2016.
+ * Represents the total rating and number of ratings a user has
+ * in a specific genre.
  */
 public class GenreCount implements Comparable, Serializable {
     String genre;
