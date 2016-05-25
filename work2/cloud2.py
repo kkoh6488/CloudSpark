@@ -2,6 +2,8 @@ from pyspark import SparkContext
 import re
 import math
 
+### WORKLOAD 2 ###
+### Input 15 ratings for movies and this will give you 50 recommendations for movies and your predicted rating ###
 
 # This function convert entries of ratings.csv into (userid -> (movieid, rating))
 def parse_rating(line):
@@ -25,7 +27,6 @@ def calculate_average(line):
 	return(line[0], (line[1], total/count))
 
 ### NEIGHBORHOOD SIM ###
-
 # Set variables ACD for use
 # userID -> ([(movieID, rating)],average)
 def do_precalculation(i, line):
@@ -33,7 +34,9 @@ def do_precalculation(i, line):
 	average = line[1][1]
 	user_sim = []
 
+	# If users has rated i
 	if i in ratings.keys():
+		# Calculate every sim(i,j)
 		rating_i = ratings[i]
 		a = rating_i - average
 		c = a * a
@@ -42,31 +45,31 @@ def do_precalculation(i, line):
 			b = rating_j - average
 			d = b * b
 				
-			# add to rdd
-			temp_tup = ( (i,j) , (a*b,c,d) )
+			# add formula components to list
+			temp_tup = ((i,j) , (a*b,c,d))
 			user_sim.append(temp_tup)
-	
 	return tuple(user_sim)
 
-# Final calcs
+# Sums tuples for sim calculation
 def add_topbottom(a, b):
 	numa, ca, da = a
 	numb, cb, db = b
 	return(numa+numb, ca+cb, da+db)
 
-
+# Performs multiplication/sqrt/division
 def do_final_calc(line):
 	num, c, d = line[1]
 	c = math.sqrt(c)
 	d = math.sqrt(d)
 	final_calc = []
 	if c*d != 0:
-		final_calc.append((line[0][1], (line[0][0],num/(c*d))))
+		final_calc.append((line[0][1], (line[0][0], num/(c*d))))
 	return tuple(final_calc)
 
+# Sorts list of sims and only returns top 10
 def keep_topten(line):
 	data = line[1]
-	top_ten= sorted(data, reverse=True, key=lambda tup: tup[1])[:10]
+	top_ten = sorted(data, reverse=True, key=lambda tup: tup[1])[:10]
 	return (line[0],top_ten)
 
 ### PREDICTION GENERATION ###
@@ -86,36 +89,32 @@ if __name__ == "__main__":
 	# Format MovieID,Title,Genres
 	movies = sc.textFile("/share/movie/movies.csv")
 
-	#personal_ratings = sc.textFile("/Users/eddie/Desktop/personalRatings.txt")
-	#ratings = sc.textFile("/Users/eddie/Desktop/ratings.csv")
-	#movies = sc.textFile("/Users/eddie/Desktop/movies.csv")
-
 	# userID -> (movieID, rating)
 	entries = ratings.map(parse_rating)
 	pentries = personal_ratings.map(parse_rating)
 
-	# movieID -> title
-	moventries = movies.map(parse_movie).collectAsMap()
 	# Stores userID -> ([(movieID, rating)],average)
 	user_aggregated = entries.groupByKey().map(calculate_average).cache()
 
-	# Create personal rating dictionary
-	p_rating = sc.broadcast(pentries.map(lambda entry:(entry[1][0],entry[1][1])).collectAsMap())
+	# Create personal rating dictionary movieID -> rating
+	p_rating = pentries.map(lambda entry:(entry[1][0],entry[1][1])).collectAsMap()
 
 	# Get all ((i,j), variables)
 	pre_calc_sim_rdd = sc.emptyRDD()
 	for i in p_rating.keys():
 		pre_calc_sim_rdd += user_aggregated.flatMap(lambda entry: do_precalculation(i, entry))
 
-
-	# Aggregate by i,j and compute similarities then cut it off
+	# Aggregate by i,j and compute similarities then keep top ten
 	# Output i -> [(j, sim),(j, sim)]
 	sim_ij = pre_calc_sim_rdd.reduceByKey(add_topbottom, 8).flatMap(do_final_calc).groupByKey().map(keep_topten)
 	
-		# Calculate top predictions and only keep top 50
+	# Calculate top predictions and only keep top 50
 	top_predictions = sim_ij.map(calculate_predictions).sortByKey(ascending=False).take(50)
-	#.sortBy(lambda entry: entry[1],  ascending=False)
 
+	# movieID -> title to add title to predictions
+	moventries = movies.map(parse_movie).collectAsMap()
+
+	# Print top 50 recommendations
 	f=open('test.txt','w')
 	for prediction in top_predictions:
 		out = ""
